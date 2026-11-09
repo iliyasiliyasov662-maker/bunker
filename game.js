@@ -130,13 +130,19 @@ function startGame(room) {
   const n = room.players.length;
   const adult = room.settings.adult;
   const deckOf = (key) => new Deck(C[key].concat(adult && C.adult[key] ? C.adult[key] : []));
-  room.decks = {};
-  for (const k of ['profession', 'health', 'hobby', 'phobia', 'baggage', 'fact', 'minus']) room.decks[k] = deckOf(k);
-  room.decks.supplies = new Deck(C.supplies);
+  // колоды живут, пока жива комната: в следующей партии карты не повторятся, пока колода не кончится
+  const deckKey = adult ? 'adult' : 'normal';
+  if (!room.decks || room.deckKey !== deckKey) {
+    room.decks = {};
+    for (const k of ['profession', 'health', 'hobby', 'phobia', 'baggage', 'fact', 'minus']) room.decks[k] = deckOf(k);
+    room.decks.supplies = new Deck(C.supplies);
+    room.deckKey = deckKey;
+  }
+  if (!room.catDeck) room.catDeck = new Deck(C.catastrophes);
   const trumpDeck = new Deck(C.trumps);
 
   // катастрофа и бункер
-  const cat = pick(C.catastrophes);
+  const cat = room.catDeck.draw();
   const foodYears = 1 + rnd(cat.years + 1);
   room.catastrophe = { name: cat.name, text: cat.text, years: cat.years };
   room.bunker = {
@@ -171,7 +177,10 @@ function startGame(room) {
   room.planted = [];
   const want = n >= 4 ? 3 : n >= 2 ? n - 1 : 0;
   const busy = new Set();
-  for (const combo of shuffle(C.combos.slice())) {
+  room.usedCombos = room.usedCombos || new Set();
+  if (room.usedCombos.size > C.combos.length - 4) room.usedCombos.clear();
+  const order = shuffle(C.combos.slice()).sort((x, y) => room.usedCombos.has(x.id) - room.usedCombos.has(y.id));
+  for (const combo of order) {
     if (room.planted.length >= want) break;
     const [[c1, t1], [c2, t2]] = combo.parts;
     const ps = shuffle(room.players.slice());
@@ -182,6 +191,7 @@ function startGame(room) {
     b.cards[c2] = dealCard(C[c2].find((x) => x.t === t2), b.female);
     busy.add(a.id + c1); busy.add(b.id + c2);
     room.planted.push(combo.id);
+    room.usedCombos.add(combo.id);
   }
   for (const p of room.players) {
     const exp = Math.min(p.age - 18, rnd(Math.max(1, Math.floor((p.age - 16) * 0.8))));

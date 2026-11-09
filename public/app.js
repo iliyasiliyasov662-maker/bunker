@@ -213,9 +213,10 @@ function renderMine(s) {
   // подсказка о ходе
   const th = $('#turnHint');
   th.innerHTML = '';
-  if (myTurn && !s.turnRevealed) th.innerHTML = s.round === 1 ? '🎤 Твой ход! Открой профессию и расскажи, почему ты нужен бункеру.' : '🎤 Твой ход! Выбери карту, которую откроешь, и убеди всех.';
+  const noneLeft = me.cards.every((c) => c.revealed);
+  if (myTurn && !s.turnRevealed && !noneLeft) th.innerHTML = s.round === 1 ? '🎤 Твой ход! Открой профессию и расскажи, почему ты нужен бункеру.' : '🎤 Твой ход! Выбери карту, которую откроешь, и убеди всех.';
   else if (myTurn) {
-    th.innerHTML = '🎤 Расскажи о своей карте, а потом ';
+    th.innerHTML = noneLeft && !s.turnRevealed ? '🎤 Все твои карты уже открыты. Скажи пару слов и ' : '🎤 Расскажи о своей карте, а потом ';
     const b = document.createElement('button');
     b.className = 'btn small primary'; b.textContent = 'Закончить ход'; b.onclick = () => api('endTurn');
     th.appendChild(b);
