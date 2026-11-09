@@ -19,6 +19,7 @@ const SKILL_NAMES = {
   med: 'медицина', food: 'еда', water: 'вода', repair: 'ремонт', electric: 'электрика',
   defense: 'оборона', science: 'наука', morale: 'боевой дух', leader: 'лидерство', tech: 'техника и связь',
   build: 'стройка', hunt: 'выживание', chem: 'химия', rescue: 'спасение', lang: 'языки',
+  nav: 'ориентирование и поиск дороги', farm: 'земледелие', teach: 'учительство',
 };
 
 // ---------- утилиты ----------
@@ -118,7 +119,11 @@ function makeBio() {
   let t = `${female ? 'Женщина' : 'Мужчина'}, ${age} ${yearsWord(age)}`;
   const tags = [female ? 'female' : 'male'];
   if (female && age <= 42 && Math.random() < 0.12) { t += ', беременна (4 месяц)'; tags.push('pregnant'); }
-  return { female, age, card: { t, tags, e: null } };
+  return { female, age, card: { t, b: 'bio', tags, e: null } };
+}
+
+function dealCard(c, female) {
+  return { t: gend(c.t, female), b: c.t, tags: c.tags.slice(), e: c.e ? gend(c.e, female) : null };
 }
 
 function startGame(room) {
@@ -128,7 +133,6 @@ function startGame(room) {
   room.decks = {};
   for (const k of ['profession', 'health', 'hobby', 'phobia', 'baggage', 'fact', 'minus']) room.decks[k] = deckOf(k);
   room.decks.supplies = new Deck(C.supplies);
-  room.decks.fates = new Deck(C.outsideFates);
   const trumpDeck = new Deck(C.trumps);
 
   // катастрофа и бункер
@@ -156,13 +160,38 @@ function startGame(room) {
     p.cards = { bio: bio.card };
     for (const k of ['profession', 'health', 'hobby', 'phobia', 'baggage', 'fact', 'minus']) {
       const c = room.decks[k].draw();
-      p.cards[k] = { t: gend(c.t, p.female), tags: c.tags.slice(), e: c.e ? gend(c.e, p.female) : null };
+      p.cards[k] = dealCard(c, p.female);
     }
-    const exp = Math.min(p.age - 18, rnd(Math.max(1, Math.floor((p.age - 16) * 0.8))));
-    p.cards.profession.t += exp <= 0 ? ' (без стажа)' : ` (стаж ${exp} ${yearsWord(exp)})`;
     p.trump = { ...trumpDeck.draw(), used: false };
     p.actions = [];
+    p.exiledRound = 0;
   }
+
+  // специально раздаём несколько скрытых связок между разными игроками
+  room.planted = [];
+  const want = n >= 4 ? 3 : n >= 2 ? n - 1 : 0;
+  const busy = new Set();
+  for (const combo of shuffle(C.combos.slice())) {
+    if (room.planted.length >= want) break;
+    const [[c1, t1], [c2, t2]] = combo.parts;
+    const ps = shuffle(room.players.slice());
+    const a = ps.find((p) => !busy.has(p.id + c1));
+    const b = ps.find((p) => p !== a && !busy.has(p.id + c2));
+    if (!a || !b) continue;
+    a.cards[c1] = dealCard(C[c1].find((x) => x.t === t1), a.female);
+    b.cards[c2] = dealCard(C[c2].find((x) => x.t === t2), b.female);
+    busy.add(a.id + c1); busy.add(b.id + c2);
+    room.planted.push(combo.id);
+  }
+  for (const p of room.players) {
+    const exp = Math.min(p.age - 18, rnd(Math.max(1, Math.floor((p.age - 16) * 0.8))));
+    p.cards.profession.t += exp <= 0 ? ' (без стажа)' : ` (стаж ${exp} ${yearsWord(exp)})`;
+  }
+
+  // испытания после выхода — видны всем с самого начала
+  const ap = shuffle((C.catastropheAfter[cat.name] || []).slice());
+  const rest = shuffle(Object.keys(C.after).filter((x) => !ap.includes(x)));
+  room.after = [ap[0], ap[1], rest[0]].filter(Boolean);
 
   room.capacity = Math.max(1, Math.ceil(n / 2));
   const kicks = n - room.capacity;
@@ -174,6 +203,7 @@ function startGame(room) {
   addLog(room, 'big', `☢️ Катастрофа: ${cat.name}. ${cat.text}`);
   addLog(room, 'sys', `Бункер: ${room.bunker.size} м², еды на ${foodYears} ${yearsWord(foodYears)}, сидеть ${cat.years} ${yearsWord(cat.years)}. Мест: ${room.capacity} из ${n}.`);
   if (foodYears < cat.years) addLog(room, 'warn', '⚠️ Еды не хватит на весь срок, нужен кто-то, кто умеет её добывать или выращивать.');
+  addLog(room, 'sys', `🎯 Цели: личная — попасть в бункер и дожить до выхода; общая — чтобы бункер выжил и отстроил новый мир. После выхода нужно будет: ${room.after.map((x) => C.after[x].name.toLowerCase()).join(', ')} и продолжить род.`);
   room.round = 0;
   if (kicks <= 0) { finish(room); return; }
   nextRound(room);
@@ -273,6 +303,7 @@ function tally(room) {
 function exile(room, id, counts) {
   const p = byId(room, id);
   p.exiled = true;
+  p.exiledRound = room.round;
   KEYS.forEach((k) => (p.revealed[k] = true));
   room.lastVote = { id, name: p.name, counts };
   room.revote = null; room.votes = {};
@@ -285,6 +316,10 @@ function exile(room, id, counts) {
 }
 
 // ---------- финал ----------
+// Всё в финале вытекает из карт: никаких случайностей, исход можно просчитать заранее.
+const PHYS = ['build', 'hunt', 'defense', 'farm', 'rescue'];
+const FLAVOR_ORDER = ['minus', 'phobia', 'health', 'hobby', 'baggage', 'profession', 'fact'];
+
 function playerTags(p) {
   const s = new Set();
   const neg = [];
@@ -301,207 +336,325 @@ function supplyTags(room) {
 }
 
 function cardWith(p, tag) {
-  for (const k of KEYS) if (p.cards[k].tags.includes(tag)) return `${LABEL[k].toLowerCase()}: ${p.cards[k].t}`;
+  for (const k of KEYS) if (p.cards[k].tags.includes(tag)) return `${LABEL[k].toLowerCase()} «${p.cards[k].t}»`;
   return '';
 }
 
-// Оценивает, как прожил бы бункер с данным составом
-function evaluate(room, ids, story) {
+const gv = (p, s) => gend(s, p.female);
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
+// связки, обе части которых есть у двух разных людей из списка
+function combosOf(members) {
+  const res = [];
+  for (const c of C.combos) {
+    const [h1, h2] = c.parts.map(([cat, text]) => members.filter((p) => p.cards[cat] && p.cards[cat].b === text));
+    let pair = null;
+    for (const a of h1) for (const b of h2) if (!pair && a !== b) pair = [a, b];
+    if (pair) res.push({ combo: c, who: pair });
+  }
+  return res;
+}
+
+// кто решает задачу: человек, связка или оборудование бункера
+function solve(needs, people, tagsOf, combos, sup) {
+  const savers = people.filter((p) => needs.some((n) => tagsOf(p).has(n)));
+  if (savers.length) return { kind: 'person', savers, tag: (p) => needs.find((n) => tagsOf(p).has(n)) };
+  const cb = combos.find((x) => needs.some((n) => x.combo.gives.includes(n)));
+  if (cb) return { kind: 'combo', cb };
+  const s = sup && needs.map((n) => sup.find((x) => x.t === n)).find(Boolean);
+  if (s) return { kind: 'sup', src: s.src };
+  return null;
+}
+
+function evaluate(room, ids) {
   const members = ids.map((id) => byId(room, id));
   const outside = room.players.filter((p) => !ids.includes(p.id));
-  const tags = new Map(members.map((p) => [p.id, playerTags(p)]));
+  const tagMap = new Map(members.map((p) => [p.id, playerTags(p)]));
+  const has = (p, t) => tagMap.get(p.id).has(t);
   const sup = supplyTags(room);
-  const supHas = (t) => sup.find((s) => s.t === t);
-  const lines = [];
+  const supHas = (t) => sup.some((x) => x.t === t);
   const per = {};
-  members.forEach((p) => (per[p.id] = { saved: [], bad: [], died: false }));
-  const g = (p, s) => gend(s, p.female);
+  members.forEach((p) => (per[p.id] = { s1: [], s2: [], notes: [], bad: [], died: null, combos: [] }));
+  const s1 = [], s2 = [];
 
-  // смерти
+  // 1. болезни: кто доживёт до выхода
+  const combos0 = combosOf(members);
   const dead = new Set();
   for (const p of members) {
-    const t = tags.get(p.id);
-    const medic = members.find((m) => m !== p && tags.get(m.id).has('med'));
-    if (t.has('terminal')) {
+    const h = p.cards.health.t;
+    if (has(p, 'terminal')) {
       dead.add(p.id);
-      lines.push(g(p, `💀 ${p.name} не дожил{|а} до конца: ${p.cards.health.t.toLowerCase()}.`));
-    } else if (t.has('dying')) {
-      if (medic) { lines.push(g(medic, `🩺 ${p.name}: болезнь удалось держать под контролем, помог{|ла} ${medic.name}.`)); per[medic.id].saved.push('лечение больных'); }
-      else if (supHas('med')) lines.push(`🩺 ${p.name} выжил${p.female ? 'а' : ''} благодаря лекарствам из бункера.`);
-      else { dead.add(p.id); lines.push(g(p, `💀 ${p.name} не пережил{|а} первый год: ${p.cards.health.t.toLowerCase()}, а лечить было некому.`)); }
+      per[p.id].died = gv(p, `Не дожил{|а} до выхода: «${h}» не лечится.`);
+    } else if (has(p, 'dying')) {
+      const medic = members.find((m) => m !== p && has(m, 'med'));
+      const cm = combos0.find((x) => !x.who.includes(p) && x.combo.gives.includes('med'));
+      if (medic) { per[p.id].notes.push(`«${h}» — болезнь тяжёлая, но ${medic.name} ${gv(medic, 'держал{|а}')} её под контролем.`); per[medic.id].s1.push('лечение больных'); }
+      else if (cm) per[p.id].notes.push(`«${h}» — болезнь тяжёлая, но выручила связка «${cm.combo.name}».`);
+      else if (supHas('med')) per[p.id].notes.push(gv(p, `«${h}» — болезнь тяжёлая, но ${p.female ? 'её' : 'его'} вытащили лекарства из медпункта бункера.`));
+      else { dead.add(p.id); per[p.id].died = gv(p, `Не пережил{|а} первый год: «${h}», а медика в бункере не было.`); }
     }
   }
-  dead.forEach((id) => (per[id].died = true));
   const living = members.filter((p) => !dead.has(p.id));
-  const lt = (p, t) => tags.get(p.id).has(t);
+  const combos = combosOf(living);
+  combos.forEach((x) => x.who.forEach((p) => per[p.id].combos.push(x)));
+  const anyHas = (t, except) => living.some((p) => p !== except && has(p, t)) || combos.some((x) => !x.who.includes(except) && x.combo.gives.includes(t));
 
-  // заразные
+  // 2. заразные
   let incidents = 0;
-  const sick = living.filter((p) => lt(p, 'contagious'));
+  const sick = living.filter((p) => has(p, 'contagious'));
   if (sick.length) {
-    const medic = living.find((p) => lt(p, 'med'));
-    if (medic || supHas('med')) lines.push(`🦠 ${namesList(sick)} ${sick.length > 1 ? 'были заразны' : 'был' + (sick[0].female ? 'а' : '') + ' ' + (sick[0].female ? 'заразна' : 'заразен')}, но болезнь не разошлась${medic ? ', ' + medic.name + ' всех вылечил' + (medic.female ? 'а' : '') : ''}.`);
-    else { incidents += 2; sick.forEach((p) => per[p.id].bad.push('заразил{|а} весь бункер')); lines.push(`🦠 ${namesList(sick)} ${sick.length > 1 ? 'заразили' : 'заразил' + (sick[0].female ? 'а' : '')} весь бункер. Полгода все лежали пластом.`); }
+    const cure = anyHas('med') || supHas('med');
+    for (const p of sick) {
+      if (cure) per[p.id].notes.push(gv(p, `«${p.cards.health.t}» — заразно, но в бункере было чем лечить, и болезнь не разошлась.`));
+      else per[p.id].bad.push(gv(p, `«${p.cards.health.t}» — заразно, а лечить было нечем: полгода весь бункер лежал пластом.`));
+    }
+    if (!cure) { incidents += 2; s1.push(`🦠 ${namesList(sick)} принесли в бункер заразу, а лечить было нечем.`); }
   }
 
-  // угрозы
-  let solved = 0, failed = 0;
-  const failedList = [];
+  // 3. угрозы внутри бункера
+  let s1solved = 0, s1failed = 0;
+  const failed = [];
+  const tags1 = (p) => tagMap.get(p.id);
   for (const th of room.threats) {
     const T = C.threats[th.id];
-    const savers = living.filter((p) => T.needs.some((n) => lt(p, n)));
-    if (savers.length) {
-      solved++;
-      savers.forEach((p) => per[p.id].saved.push(`«${T.name}»`));
-      const line = gend(T.win, savers[0].female).replace('{who}', savers[0].name);
-      lines.push(`✅ ${line.charAt(0).toUpperCase() + line.slice(1)}`);
-      continue;
+    const r = solve(T.needs, living, tags1, combos, sup);
+    if (r && r.kind === 'person') {
+      s1solved++;
+      const p = r.savers[0];
+      r.savers.forEach((x) => per[x.id].s1.push(`«${T.name}» (${cardWith(x, r.tag(x))})`));
+      s1.push('✅ ' + cap(gend(T.win, p.female).replace('{who}', p.name)));
+    } else if (r && r.kind === 'combo') {
+      s1solved++;
+      r.cb.who.forEach((x) => per[x.id].s1.push(`«${T.name}» (связка «${r.cb.combo.name}»)`));
+      s1.push(`✅ «${T.name}» — выручила связка «${r.cb.combo.name}»: ${namesList(r.cb.who)}.`);
+    } else if (r) {
+      s1solved++;
+      s1.push(`✅ «${T.name}» — выручило оборудование бункера: «${r.src}».`);
+    } else {
+      s1failed++; failed.push({ stage: 1, id: th.id, name: T.name, needs: T.needs });
+      let line = `❌ «${T.name}». ${T.lose}`;
+      const could = outside.find((p) => T.needs.some((n) => playerTags(p).has(n)));
+      if (could) line += ` Спас бы ${could.name} (${cardWith(could, T.needs.find((n) => playerTags(could).has(n)))}), но ${could.female ? 'её' : 'его'} выгнали.`;
+      s1.push(line);
     }
-    const s = T.needs.map(supHas).find(Boolean);
-    if (s) { solved++; lines.push(`✅ «${T.name}» — не беда: в бункере нашлось «${s.src}».`); continue; }
-    failed++; failedList.push(th.id);
-    let line = `❌ ${T.lose}`;
-    const could = outside.filter((p) => T.needs.some((n) => playerTags(p).has(n)));
-    if (could.length) {
-      const p = could[0];
-      const need = T.needs.find((n) => playerTags(p).has(n));
-      line += ` А ведь ${p.name} (${cardWith(p, need)}) мог${p.female ? 'ла' : ''} всё исправить.`;
-    }
-    lines.push(line);
   }
 
-  // плохие черты
-  const has = (t, except) => living.some((p) => p !== except && lt(p, t));
+  // 4. плохие черты из карт
+  const cardOf = (p, t) => { for (const k of KEYS) if (p.cards[k].tags.includes(t)) return p.cards[k].t; return ''; };
   for (const p of living) {
-    const t = tags.get(p.id);
-    if (t.has('danger')) {
-      if (has('defense', p) || has('leader', p)) {
-        const cop = living.find((m) => m !== p && (lt(m, 'defense') || lt(m, 'leader')));
-        lines.push(`🔒 ${p.name} пытал${p.female ? 'ась' : 'ся'} устроить беспредел, но ${cop.name} быстро это ${cop.female ? 'пресекла' : 'пресёк'}.`);
-      }
-      else { incidents++; per[p.id].bad.push('устроил{|а} поножовщину'); lines.push(`🔪 ${p.name} однажды ночью сорвал${p.female ? 'ась' : 'ся'}. Остановить было некому, бункер это запомнил надолго.`); }
+    const keeper = (tagsList) => living.find((m) => m !== p && tagsList.some((t) => has(m, t)));
+    const rules = [
+      ['danger', ['defense', 'leader'], (k) => `«${cardOf(p, 'danger')}» — ${k.name} ${gv(k, 'держал{|а}')} ${p.female ? 'её' : 'его'} в узде.`, `«${cardOf(p, 'danger')}» — остановить ${p.female ? 'её' : 'его'} было некому, в бункере были драки.`],
+      ['thief', ['leader', 'defense'], (k) => gv(p, `«${cardOf(p, 'thief')}» — таскал{|а} запасы, но ${k.name} быстро ${gv(k, 'вычислил{|а}')} вора.`), gv(p, `«${cardOf(p, 'thief')}» — тихо таскал{|а} запасы, и склад опустел раньше срока.`)],
+      ['glutton', ['food', 'farm'], () => gv(p, `«${cardOf(p, 'glutton')}» — ел{|а} за троих, но еды хватало.`), gv(p, `«${cardOf(p, 'glutton')}» — съедал{|а} больше всех, а пополнять запасы было некому.`)],
+      ['conflict', ['morale', 'leader'], (k) => gv(p, `«${cardOf(p, 'conflict')}» — ругал{ся|ась} со всеми, но ${k.name} ${gv(k, 'гасил{|а}')} ссоры.`), gv(p, `«${cardOf(p, 'conflict')}» — перессорил{|а} весь бункер, мирить было некому.`)],
+    ];
+    for (const [tag, fix, ok, bad] of rules) {
+      if (!has(p, tag)) continue;
+      const k = keeper(fix) || (combos.find((x) => !x.who.includes(p) && fix.some((t) => x.combo.gives.includes(t))) ? { name: 'связка', female: true } : null)
+        || (tag === 'glutton' && supHas('food') ? { name: 'склад', female: false } : null);
+      if (k) per[p.id].notes.push(ok(k));
+      else { incidents++; per[p.id].bad.push(bad); }
     }
-    if (t.has('thief')) {
-      if (has('leader', p) || has('defense', p)) lines.push(`🕵️ ${p.name} таскал${p.female ? 'а' : ''} запасы, но ${p.female ? 'её' : 'его'} быстро поймали.`);
-      else { incidents++; per[p.id].bad.push('разворовал{|а} запасы'); lines.push(`🕵️ ${p.name} тихо таскал${p.female ? 'а' : ''} запасы. Заметили, когда склад опустел наполовину.`); }
-    }
-    if (t.has('glutton')) {
-      if (has('food') || supHas('food')) lines.push(`🍖 ${p.name} ел${p.female ? 'а' : ''} за троих, но еды хватало.`);
-      else { incidents++; per[p.id].bad.push('съел{|а} лишнее'); lines.push(`🍖 ${p.name} съел${p.female ? 'а' : ''} недельный запас за ночь. Пополнить его было нечем.`); }
-    }
-    if (t.has('conflict')) {
-      if (has('morale', p) || has('leader', p)) lines.push(`🗣️ ${p.name} постоянно со всеми ругал${p.female ? 'ась' : 'ся'}, но до драк не доходило.`);
-      else { incidents++; per[p.id].bad.push('перессорил{|а} всех'); lines.push(`🗣️ ${p.name} перессорил${p.female ? 'а' : ''} весь бункер. Последний год никто ни с кем не разговаривал.`); }
+    if (has(p, 'lazy')) per[p.id].notes.push(gv(p, `«${cardOf(p, 'lazy')}» — работал{|а} меньше всех, но вреда от этого не было.`));
+  }
+  // фобии, которые перечеркнули навык
+  for (const p of members) {
+    const neg = p.cards.phobia.tags.filter((t) => t.startsWith('-')).map((t) => t.slice(1));
+    for (const t of neg) {
+      const src = KEYS.find((k) => k !== 'phobia' && p.cards[k].tags.includes(t));
+      if (src) per[p.id].notes.push(`«${p.cards.phobia.t}» перечеркнула навык: ${SKILL_NAMES[t]} (${LABEL[src].toLowerCase()} «${p.cards[src].t}») не пригодилась.`);
     }
   }
 
-  // забавные эпизоды
-  if (story) {
-    for (const p of shuffle(living.slice())) {
-      const c = shuffle(KEYS.slice()).map((k) => p.cards[k]).find((c) => c.e);
-      if (c) lines.push('💬 ' + c.e.replace(/\{name\}/g, p.name));
+  // 5. после выхода: только люди и связки, оборудование бункера с собой не унесёшь
+  const medOut = living.some((p) => has(p, 'med')) || combos.some((x) => x.combo.gives.includes('med'));
+  const tags2map = new Map();
+  for (const p of living) {
+    const t = new Set(tagMap.get(p.id));
+    const elder = p.age >= 65;
+    const weak = t.has('weak') && !medOut;
+    if (elder || weak) {
+      const lost = PHYS.filter((x) => t.has(x));
+      PHYS.forEach((x) => t.delete(x));
+      if (elder) per[p.id].notes.push(gv(p, `В ${p.age} ${yearsWord(p.age)} тяжёлую работу на поверхности уже не тянул{|а}${lost.length ? ' — ' + lost.map((x) => SKILL_NAMES[x]).join(', ') + ' после выхода не в счёт' : ''}.`));
+      else per[p.id].notes.push(gv(p, `«${p.cards.health.t}» — без медика после выхода быстро ослаб{|ла}${lost.length ? ' и не мог{|ла} работать руками' : ''}.`));
+    }
+    tags2map.set(p.id, t);
+  }
+  let s2solved = 0, s2failed = 0;
+  for (const id of room.after) {
+    const A = C.after[id];
+    const r = solve(A.needs, living, (p) => tags2map.get(p.id), combos, null);
+    if (r && r.kind === 'person') {
+      s2solved++;
+      const p = r.savers[0];
+      r.savers.forEach((x) => per[x.id].s2.push(`«${A.name}» (${cardWith(x, r.tag(x))})`));
+      s2.push('✅ ' + cap(gend(A.win, p.female).replace('{who}', p.name)));
+    } else if (r) {
+      s2solved++;
+      r.cb.who.forEach((x) => per[x.id].s2.push(`«${A.name}» (связка «${r.cb.combo.name}»)`));
+      s2.push(`✅ «${A.name}» — выручила связка «${r.cb.combo.name}»: ${namesList(r.cb.who)}.`);
+    } else {
+      s2failed++; failed.push({ stage: 2, id, name: A.name, needs: A.needs });
+      let line = `❌ «${A.name}». ${A.lose}`;
+      const could = outside.find((p) => A.needs.some((n) => playerTags(p).has(n)));
+      if (could) line += ` Справил${could.female ? 'ась' : 'ся'} бы ${could.name} (${cardWith(could, A.needs.find((n) => playerTags(could).has(n)))}).`;
+      s2.push(line);
     }
   }
-
   // продолжение рода
-  const fertile = (p) => !lt(p, 'infertile') && (p.female ? p.age <= 45 : p.age <= 65);
-  const pregnant = living.some((p) => lt(p, 'pregnant'));
-  const pop = pregnant || (living.some((p) => !p.female && fertile(p)) && living.some((p) => p.female && fertile(p)));
-  if (living.length) {
-    if (pop) lines.push(pregnant ? '👶 В бункере родился ребёнок. Человечество продолжается!' : '👶 Среди выживших есть те, кто сможет продолжить род. У человечества есть будущее.');
-    else lines.push('🚫 Продолжить род среди выживших некому. Вы последние.');
+  const fertile = (p) => !has(p, 'infertile') && (p.female ? p.age <= 45 : p.age <= 65);
+  const pregnant = living.find((p) => has(p, 'pregnant'));
+  const men = living.filter((p) => !p.female && fertile(p)), women = living.filter((p) => p.female && fertile(p));
+  const pop = !!pregnant || (men.length > 0 && women.length > 0);
+  if (!living.length) s2.push('❌ Выходить на поверхность было некому.');
+  else if (pregnant) s2.push(`✅ Продолжить род: ${pregnant.name} пришла в бункер беременной, и в новом мире родился первый ребёнок.`);
+  else if (pop) s2.push(`✅ Продолжить род: среди выживших есть и мужчины, и женщины подходящего возраста — у человечества будет будущее.`);
+  else {
+    const why = !men.length && !women.length ? 'нет никого подходящего возраста и здоровья' : !men.length ? 'не осталось мужчин подходящего возраста' : 'не осталось женщин подходящего возраста';
+    s2.push(`❌ Продолжить род некому: ${why}. Вы последние.`);
+    failed.push({ stage: 2, id: 'kids', name: 'Продолжить род', needs: [] });
   }
 
-  const score = solved * 3 - failed * 3 - incidents - dead.size * 1.5 + (pop ? 2 : 0);
+  const s2f = s2failed + (pop ? 0 : 1);
+  const score = s1solved * 3 - s1failed * 3 - incidents - dead.size * 1.5 + s2solved * 2 - s2failed * 2 + (pop ? 3 : -3);
+  const total = s1failed + s2f + (incidents >= 2 ? 1 : 0);
   let verdict;
-  if (!living.length) verdict = { kind: 'doom', title: 'Бункер опустел', text: 'Никто не дожил до выхода на поверхность.' };
-  else if (failed >= 2) verdict = { kind: 'doom', title: 'Бункер погиб', text: 'Слишком много проблем, с которыми некому было справиться.' };
-  else if (failed === 1 || incidents >= 2) verdict = { kind: 'loss', title: 'Выжили, но с потерями', text: pop ? 'Было тяжело, но кто-то всё-таки вышел на поверхность.' : 'Вы вышли наружу, но новых людей уже не будет.' };
-  else if (pop) verdict = { kind: 'win', title: 'Человечество спасено!', text: 'Бункер справился со всем, и у человечества есть будущее.' };
-  else verdict = { kind: 'loss', title: 'Выжили, но вы последние', text: 'Вы справились со всеми бедами, но продолжить род некому.' };
+  if (!living.length) verdict = { kind: 'doom', title: 'Бункер опустел', text: 'До выхода на поверхность не дожил никто.' };
+  else if (s1failed >= 2) verdict = { kind: 'doom', title: 'Бункер погиб', text: 'Внутри случилось слишком много бед, с которыми было некому справиться.' };
+  else if (total === 0) verdict = { kind: 'win', title: 'Человечество спасено!', text: 'Пережили бункер и отстроили новый мир.' };
+  else if (total === 1) verdict = { kind: 'win', title: 'Выжили и отстроились', text: 'Не без потерь, но у человечества есть будущее.' };
+  else if (s2f >= 2) verdict = { kind: 'loss', title: 'Бункер пережили, а новый мир — нет', text: 'Внутри справились, но после выхода оказались беспомощны.' };
+  else verdict = { kind: 'loss', title: 'Выжили, но с тяжёлыми потерями', text: 'Слишком многое пошло не так.' };
 
-  return { score, verdict, lines, per, failedList, dead, solved, failed, incidents, pop };
+  return { score, verdict, s1, s2, per, dead, living, combos, failed, s1failed, s2failed: s2f, incidents, pop };
 }
 
 function finish(room) {
   room.phase = 'epilogue';
   const kept = alive(room).map((p) => p.id);
-  const actual = evaluate(room, kept, true);
+  const A = evaluate(room, kept);
   const cat = room.catastrophe;
+  const teamWin = A.verdict.kind === 'win';
 
-  const lines = [];
-  lines.push(`🚪 Гермодверь закрылась. Внутри: ${namesList(alive(room))}. Снаружи — ${cat.name.toLowerCase()}. Продержаться нужно ${cat.years} ${yearsWord(cat.years)}.`);
+  const intro = [`🚪 Гермодверь закрылась. Внутри: ${namesList(alive(room)) || 'никого'}. Снаружи — ${cat.name.toLowerCase()}. Сидеть ${cat.years} ${yearsWord(cat.years)}.`];
   const hidden = room.threats.filter((t) => !t.known).map((t) => C.threats[t.id].name);
-  if (hidden.length) lines.push(`🔍 Скрытые проблемы бункера: ${hidden.join(', ')}.`);
-  lines.push(...actual.lines);
-  for (const p of room.players.filter((x) => x.exiled)) lines.push('🌫️ ' + gend(room.decks.fates.draw(), p.female).replace(/\{name\}/g, p.name));
-  const target = room.players.slice().sort((x, y) => (y.tomatoes || 0) - (x.tomatoes || 0))[0];
-  if (target && target.tomatoes) lines.push(`🍅 Главная мишень бункера: ${target.name}, ${target.tomatoes} ${target.tomatoes % 10 === 1 && target.tomatoes % 100 !== 11 ? 'помидор' : [2, 3, 4].includes(target.tomatoes % 10) && ![12, 13, 14].includes(target.tomatoes % 100) ? 'помидора' : 'помидоров'} в противогаз.`);
+  if (hidden.length) intro.push(`🔍 Скрытые проблемы бункера были: ${hidden.join(', ')}.`);
+  const sections = [
+    { title: `В бункере, ${cat.years} ${yearsWord(cat.years)}`, lines: A.s1 },
+    { title: 'После выхода', lines: A.s2 },
+  ];
 
-  // ищем идеальный состав
-  const all = room.players.map((p) => p.id);
-  let best = null;
-  for (const combo of combinations(all, kept.length)) {
-    const ev = evaluate(room, combo, false);
-    const overlap = combo.filter((id) => kept.includes(id)).length;
-    if (!best || ev.score > best.ev.score + 1e-9 || (Math.abs(ev.score - best.ev.score) < 1e-9 && overlap > best.overlap)) {
-      best = { combo, ev, overlap };
+  // связки
+  const all = combosOf(room.players);
+  const combos = all.map((x) => {
+    const names = namesList(x.who);
+    const out = x.who.filter((p) => p.exiled);
+    const died = x.who.filter((p) => A.dead.has(p.id));
+    let status, note;
+    if (out.length) { status = 'broken'; note = `Развалили: ${namesList(out)} — выгнали.`; }
+    else if (died.length) { status = 'lost'; note = `Не сработала: ${namesList(died)} не ${died.length > 1 ? 'дожили' : gv(died[0], 'дожил{|а}')}.`; }
+    else { status = 'worked'; note = x.combo.text; }
+    return { name: x.combo.name, who: names, status, note, planted: room.planted.includes(x.combo.id) };
+  });
+
+  // история каждого игрока
+  const people = room.players.map((p) => {
+    const inside = kept.includes(p.id);
+    const head = `${p.cards.profession.t} · ${p.cards.bio.t}`;
+    const text = [];
+    let personal;
+    if (inside) {
+      const r = A.per[p.id];
+      personal = !r.died;
+      if (r.died) text.push(r.died);
+      if (r.s1.length) text.push(gv(p, `В бункере выручил{|а}: ${r.s1.join(', ')}.`));
+      if (r.s2.length) text.push(gv(p, `После выхода пригодил{ся|ась}: ${r.s2.join(', ')}.`));
+      for (const x of r.combos) {
+        const other = x.who.find((o) => o !== p);
+        text.push(`🔗 Связка «${x.combo.name}» (в паре: ${other.name}). ${x.combo.text}`);
+      }
+      text.push(...r.notes);
+      text.push(...r.bad);
+      if (!r.died && !r.s1.length && !r.s2.length && !r.combos.length) text.push(gv(p, `Из того, что понадобилось бункеру, ${p.female ? 'она' : 'он'} ничего не умел{|а}.`));
+      const fk = FLAVOR_ORDER.find((k) => p.cards[k].e);
+      if (fk) text.push('💬 ' + p.cards[fk].e.replace(/\{name\}/g, p.name));
+    } else {
+      personal = false;
+      text.push(gv(p, `Выгнан{|а} в ${p.exiledRound || '?'}-м раунде.`));
+      const t = playerTags(p);
+      const skills = [...t].filter((x) => SKILL_NAMES[x]).map((x) => SKILL_NAMES[x]);
+      const missed = A.failed.filter((f) => f.needs.some((n) => t.has(n)));
+      if (missed.length) text.push(`Как раз ${p.female ? 'её' : 'его'} и не хватило: ${missed.map((f) => `«${f.name}» (${cardWith(p, f.needs.find((n) => t.has(n)))})`).join(', ')}.`);
+      const broken = all.filter((x) => x.who.includes(p));
+      for (const x of broken) {
+        const other = x.who.find((o) => o !== p);
+        text.push(`🔗 Мог${p.female ? 'ла' : ''} бы собрать связку «${x.combo.name}» (в паре: ${other.name}).`);
+      }
+      if (!missed.length && !broken.length) text.push(skills.length ? `Умел${p.female ? 'а' : ''}: ${skills.join(', ')}, но это бункер закрыл и без ${p.female ? 'неё' : 'него'}.` : `Бункер без ${p.female ? 'неё' : 'него'} ничего не потерял.`);
+      const bads = Object.keys(BAD_TAGS).filter((k) => t.has(k));
+      if (bads.length) text.push(`Зато в бункере ${p.female ? 'она' : 'он'} ${bads.map((k) => gend(BAD_TAGS[k], p.female)).join(', ')}.`);
     }
-  }
-  const perfect = actual.score >= best.ev.score - 1e-9;
-  if (perfect) best = { combo: kept, ev: actual, overlap: kept.length };
+    return { id: p.id, name: p.name, color: p.color, inside, head, text, personal, team: teamWin, tomatoes: p.tomatoes || 0 };
+  });
 
-  const players = room.players.map((p) => {
-    const inBest = best.combo.includes(p.id);
-    const wasKept = kept.includes(p.id);
+  // идеальный состав
+  const ids = room.players.map((p) => p.id);
+  let best = null;
+  for (const combo of combinations(ids, kept.length)) {
+    const ev = evaluate(room, combo);
+    const overlap = combo.filter((id) => kept.includes(id)).length;
+    if (!best || ev.score > best.ev.score + 1e-9 || (Math.abs(ev.score - best.ev.score) < 1e-9 && overlap > best.overlap)) best = { combo, ev, overlap };
+  }
+  const perfect = A.score >= best.ev.score - 1e-9;
+  if (perfect) best = { combo: kept, ev: A, overlap: kept.length };
+  const verdicts = room.players.map((p) => {
+    const inBest = best.combo.includes(p.id), wasKept = kept.includes(p.id);
     const ok = inBest === wasKept;
     let label, reason;
-    const bads = () => {
-      const t = playerTags(p);
-      const r = Object.keys(BAD_TAGS).filter((k) => t.has(k)).map((k) => gend(BAD_TAGS[k], p.female));
-      return r;
-    };
     if (wasKept && ok) {
       label = '✅ Правильно оставили';
-      const s = actual.per[p.id].saved;
-      if (s.length) reason = 'Пригодил' + (p.female ? 'ась' : 'ся') + ': ' + s.join(', ') + '.';
-      else if (actual.pop) reason = 'Проблем не создавал' + (p.female ? 'а' : '') + ' и пригодил' + (p.female ? 'ась' : 'ся') + ' для продолжения рода.';
-      else reason = 'Особой пользы не было, но и лучшей замены тоже.';
+      const r = A.per[p.id];
+      const got = r.s1.concat(r.s2);
+      reason = got.length ? `Пригодил${p.female ? 'ась' : 'ся'}: ${got.slice(0, 3).join(', ')}.` : A.pop ? 'Особых навыков нет, но был нужен для продолжения рода.' : 'Особой пользы не было, но и лучшей замены тоже.';
     } else if (!wasKept && ok) {
       label = '✅ Правильно выгнали';
-      const b = bads();
-      reason = b.length ? 'В бункере ' + (p.female ? 'она' : 'он') + ' ' + b.join(', ') + '.' : 'Ничего такого, чего не умели бы остальные.';
-    } else if (!wasKept && !ok) {
+      const t = playerTags(p);
+      const b = Object.keys(BAD_TAGS).filter((k) => t.has(k)).map((k) => gend(BAD_TAGS[k], p.female));
+      reason = b.length ? `В бункере ${p.female ? 'она' : 'он'} ${b.join(', ')}.` : 'Ничего такого, чего не умели бы остальные.';
+    } else if (!wasKept) {
       label = '❌ Зря выгнали';
-      const s = best.ev.per[p.id] ? best.ev.per[p.id].saved.map((x) => gend(x, p.female)) : [];
-      const sk = [...playerTags(p)].filter((t) => SKILL_NAMES[t]).map((t) => SKILL_NAMES[t]);
-      reason = s.length ? 'Пригодил' + (p.female ? 'ась' : 'ся') + ' бы: ' + s.join(', ') + '.' : sk.length ? 'Пригодил' + (p.female ? 'ась' : 'ся') + ' бы: ' + sk.join(', ') + '.' : 'С ' + (p.female ? 'ней' : 'ним') + ' состав был бы надёжнее.';
+      const r = best.ev.per[p.id];
+      const got = r ? r.s1.concat(r.s2) : [];
+      reason = got.length ? `С ${p.female ? 'ней' : 'ним'} закрыли бы: ${got.slice(0, 3).join(', ')}.` : `С ${p.female ? 'ней' : 'ним'} состав был бы надёжнее.`;
     } else {
       label = '❌ Зря оставили';
-      const r = actual.per[p.id];
-      const b = r.bad.map((x) => gend(x, p.female));
-      if (r.died) b.unshift('не дожил' + (p.female ? 'а' : '') + ' до конца');
-      if (!r.saved.length) b.push('ничем особо не помог' + (p.female ? 'ла' : ''));
-      reason = b.join(', ') + '.';
-      reason = reason.charAt(0).toUpperCase() + reason.slice(1);
+      const r = A.per[p.id];
+      const b = [];
+      if (r.died) b.push(gv(p, 'не дожил{|а} до выхода'));
+      if (r.bad.length) b.push(gv(p, 'создавал{|а} проблемы'));
+      if (!r.s1.length && !r.s2.length) b.push(gv(p, 'ничем не помог{|ла}'));
+      const instead = best.combo.filter((id) => !kept.includes(id)).map((id) => byId(room, id));
+      const verb = instead.length > 1 ? 'дали бы' : instead[0] && instead[0].female ? 'дала бы' : 'дал бы';
+      reason = b.length ? cap(b.join(', ') + '.') : `Польза была, но ${namesList(instead)} ${verb} бункеру больше.`;
     }
-    return { id: p.id, name: p.name, color: p.color, kept: wasKept, inBest, ok, label, reason };
+    return { id: p.id, name: p.name, color: p.color, ok, label, reason };
   });
-  const matched = kept.filter((id) => best.combo.includes(id)).length;
+
+  const extra = [];
+  const shooter = room.players.slice().sort((x, y) => (y.tomatoes || 0) - (x.tomatoes || 0))[0];
+  if (shooter && shooter.tomatoes) extra.push(`🍅 Главная мишень бункера: ${shooter.name}, ${shooter.tomatoes} ${shooter.tomatoes % 10 === 1 && shooter.tomatoes % 100 !== 11 ? 'помидор' : [2, 3, 4].includes(shooter.tomatoes % 10) && ![12, 13, 14].includes(shooter.tomatoes % 100) ? 'помидора' : 'помидоров'} в противогаз.`);
 
   room.epilogue = {
-    verdict: actual.verdict,
-    lines,
+    verdict: A.verdict, intro, sections, people, combos, extra,
     analysis: {
-      perfect,
-      matched, capacity: kept.length,
-      bestNames: best.combo.map((id) => byId(room, id).name),
-      bestVerdict: best.ev.verdict,
-      hopeless: best.ev.verdict.kind === 'doom',
-      players,
+      perfect, matched: kept.filter((id) => best.combo.includes(id)).length, capacity: kept.length,
+      bestNames: best.combo.map((id) => byId(room, id).name), bestVerdict: best.ev.verdict,
+      hopeless: best.ev.verdict.kind === 'doom', players: verdicts,
     },
   };
-  addLog(room, 'big', `🏁 Игра окончена: ${actual.verdict.title}`);
+  addLog(room, 'big', `🏁 Игра окончена: ${A.verdict.title}`);
 }
 
 // ---------- действия игроков ----------
@@ -626,12 +779,12 @@ function handle(room, p, msg) {
           break;
         }
         case 'heal':
-          p.cards.health = { t: p.female ? 'Абсолютно здорова (чудесно исцелилась)' : 'Абсолютно здоров (чудесно исцелился)', tags: ['healthy'], e: null };
+          p.cards.health = { t: p.female ? 'Абсолютно здорова (чудесно исцелилась)' : 'Абсолютно здоров (чудесно исцелился)', b: 'heal', tags: ['healthy'], e: null };
           addLog(room, 'trump', `✨ ${p.name} чудесно исцеляется!${p.revealed.health ? ' Новое здоровье: ' + p.cards.health.t : ''}`);
           break;
         case 'reroll_baggage': {
           const c = room.decks.baggage.draw();
-          p.cards.baggage = { t: gend(c.t, p.female), tags: c.tags.slice(), e: c.e ? gend(c.e, p.female) : null };
+          p.cards.baggage = dealCard(c, p.female);
           addLog(room, 'trump', `🎒 ${p.name} меняет багаж.${p.revealed.baggage ? ' Теперь у ' + (p.female ? 'неё' : 'него') + ': ' + p.cards.baggage.t : ''}`);
           break;
         }
@@ -741,6 +894,7 @@ function view(room, me) {
       supplies: room.supplyBonus.map((s) => s.t),
     },
     knownThreats: room.threats.filter((t) => t.known).map((t) => C.threats[t.id].name),
+    after: (room.after || []).map((x) => C.after[x].name).concat(room.after ? ['Продолжить род'] : []),
     log: room.log.slice(-90),
     labels: LABEL, keys: KEYS,
     epilogue: room.epilogue,

@@ -165,9 +165,12 @@ function renderLeft(s) {
     <ul>${b.features.map((f) => `<li class="${f.broken ? 'broken' : ''}">${esc(f.t)}</li>`).join('')}
     ${b.supplies.map((t) => `<li>${esc(t)} <span class="muted">(снаружи)</span></li>`).join('')}</ul></div>
     <div class="sect muted">Мест: ${s.capacity} · сейчас внутри: ${aliveList().length}</div>`;
+  const afterHtml = s.after && s.after.length ? `<div class="sect"><div class="sect-title">После выхода нужно будет</div><ul>${s.after.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div>` : '';
+  const goals = '<div class="sect goals"><div class="sect-title">Цели</div>🙋 Личная: попасть в бункер и дожить до выхода.<br>🌍 Общая: чтобы бункер выжил и отстроил новый мир.</div>';
   $('#threats').innerHTML = s.knownThreats.length
     ? `<div class="sect"><div class="sect-title">Известные проблемы</div><ul>${s.knownThreats.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div>`
     : '<div class="sect muted">Какие проблемы ждут бункер — неизвестно. На 3-м раунде что-нибудь скажут по радио.</div>';
+  $('#threats').innerHTML += afterHtml + goals;
   $('#notes').innerHTML = s.me.notes.length ? `<div class="sect"><div class="sect-title">Твои секреты</div>${s.me.notes.map((n) => `<div class="note">${esc(n)}</div>`).join('')}</div>` : '';
 }
 
@@ -272,7 +275,7 @@ $('#chatForm').onsubmit = (e) => {
 // ---------- финал ----------
 function renderEpilogue(s) {
   const ep = s.epilogue;
-  const key = ep.lines.join('|');
+  const key = JSON.stringify([ep.intro, ep.sections]);
   const fresh = key !== epiShownKey;
   if (fresh) { epiShownKey = key; epiClosed = false; }
   $('#epilogue').hidden = epiClosed;
@@ -280,28 +283,53 @@ function renderEpilogue(s) {
   const v = $('#epiVerdict');
   v.className = ep.verdict.kind;
   v.innerHTML = `<p class="v-title">${esc(ep.verdict.title)}</p><div class="muted">${esc(ep.verdict.text)}</div>`;
+  if (!fresh) return renderEpiActions(s);
 
-  if (fresh) {
-    $('#epiStory').innerHTML = ep.lines.map((l, i) => `<p style="animation-delay:${(i * 0.55).toFixed(2)}s">${esc(l)}</p>`).join('');
-    const a = ep.analysis;
-    const delay = (ep.lines.length * 0.55 + 0.3).toFixed(2);
-    const best = a.perfect
-      ? '<div class="best">🏆 <b>Идеальный выбор!</b> Лучше составить бункер было нельзя.</div>'
-      : `<div class="best">Лучший состав был: <b>${a.bestNames.map(esc).join(', ')}</b>. С ним итог был бы: «${esc(a.bestVerdict.title)}».<br>Вы угадали <b>${a.matched} из ${a.capacity}</b> мест.${a.hopeless ? '<br>Честно говоря, с такими картами бункер было не спасти никому.' : ''}</div>`;
-    $('#epiAnalysis').innerHTML = `<h3>Правильно ли вы выбрали?</h3>${best}<div class="judge">${a.players.map((p) => `
-      <div class="judge-row ${p.ok ? 'good' : 'bad'}">
-        <div class="who"><span class="dot" style="background:${p.color}"></span>${esc(p.name)}</div>
-        <div>${esc(p.label)}</div>
-        <div class="why">${esc(p.reason)}</div>
-      </div>`).join('')}</div>`;
-    $('#epiAnalysis').style.animation = `line .6s ${delay}s forwards`;
-    $('#epiAnalysis').style.opacity = 0;
-    $('#epiCardsList').innerHTML = s.players.map((p) => {
-      const c = (s.allCards || []).find((x) => x.id === p.id);
-      return `<div class="pc"><div class="pl-head" style="margin-bottom:4px"><span class="dot" style="background:${p.color}"></span><b style="color:var(--text)">${esc(p.name)}</b>${p.exiled ? '<span class="tag red">выгнан</span>' : '<span class="tag green">в бункере</span>'}</div>
-        ${c ? c.cards.map((x) => `<div><b>${esc(x.label)}:</b> ${esc(x.t)}</div>`).join('') : ''}</div>`;
-    }).join('');
-  }
+  let i = 0;
+  const line = (t, cls = '') => `<p class="${cls}" style="animation-delay:${(i++ * 0.35).toFixed(2)}s">${esc(t)}</p>`;
+  let html = ep.intro.map((t) => line(t)).join('');
+  for (const sc of ep.sections) html += `<h4 style="animation-delay:${(i * 0.35).toFixed(2)}s">${esc(sc.title)}</h4>` + sc.lines.map((t) => line(t)).join('');
+  const t0 = (i * 0.35 + 0.2).toFixed(2);
+
+  html += `<h4 style="animation-delay:${t0}s">Кто как прожил</h4><div class="people" style="animation-delay:${t0}s">${ep.people.map((p) => `
+    <div class="person ${p.inside ? '' : 'out'}">
+      <div class="pl-head"><span class="dot" style="background:${p.color}"></span><b>${esc(p.name)}</b>
+        <span class="tag ${p.personal ? 'green' : 'red'}">${p.personal ? 'личная победа' : 'лично проиграл'}</span>
+        <span class="tag ${p.team ? 'green' : 'red'}">${p.team ? 'общая победа' : 'общий проигрыш'}</span></div>
+      <div class="muted small">${esc(p.head)}</div>
+      ${p.text.map((t) => `<p>${esc(t)}</p>`).join('')}
+    </div>`).join('')}</div>`;
+
+  if (ep.combos.length) {
+    const st = { worked: '✅ сработала', broken: '💔 развалили', lost: '⚰️ не дожили' };
+    html += `<h4 style="animation-delay:${t0}s">Связки между картами</h4><div class="combos" style="animation-delay:${t0}s">${ep.combos.map((c) => `
+      <div class="combo ${c.status}"><b>${esc(c.name)}</b> <span class="muted">· ${esc(c.who)} · ${st[c.status]}</span><div>${esc(c.note)}</div></div>`).join('')}</div>`;
+  } else html += `<p class="muted" style="animation-delay:${t0}s">Связок между картами в этой игре не сложилось.</p>`;
+  if (ep.extra && ep.extra.length) html += ep.extra.map((t) => `<p style="animation-delay:${t0}s">${esc(t)}</p>`).join('');
+  $('#epiStory').innerHTML = html;
+
+  const a = ep.analysis;
+  const best = a.perfect
+    ? '<div class="best">🏆 <b>Идеальный выбор!</b> Лучше составить бункер было нельзя.</div>'
+    : `<div class="best">Лучший состав был: <b>${a.bestNames.map(esc).join(', ')}</b>. С ним итог был бы: «${esc(a.bestVerdict.title)}».<br>Вы угадали <b>${a.matched} из ${a.capacity}</b> мест.${a.hopeless ? '<br>Честно говоря, с такими картами бункер было не спасти никому.' : ''}</div>`;
+  $('#epiAnalysis').innerHTML = `<h3>Правильно ли вы выбрали?</h3>${best}<div class="judge">${a.players.map((p) => `
+    <div class="judge-row ${p.ok ? 'good' : 'bad'}">
+      <div class="who"><span class="dot" style="background:${p.color}"></span>${esc(p.name)}</div>
+      <div>${esc(p.label)}</div>
+      <div class="why">${esc(p.reason)}</div>
+    </div>`).join('')}</div>`;
+  $('#epiAnalysis').style.opacity = 0;
+  $('#epiAnalysis').style.animation = `line .6s ${(+t0 + 0.4).toFixed(2)}s forwards`;
+  $('#epiCardsList').innerHTML = s.players.map((p) => {
+    const c = (s.allCards || []).find((x) => x.id === p.id);
+    return `<div class="pc"><div class="pl-head" style="margin-bottom:4px"><span class="dot" style="background:${p.color}"></span><b style="color:var(--text)">${esc(p.name)}</b>${p.exiled ? '<span class="tag red">выгнан</span>' : '<span class="tag green">в бункере</span>'}</div>
+      ${c ? c.cards.map((x) => `<div><b>${esc(x.label)}:</b> ${esc(x.t)}</div>`).join('') : ''}</div>`;
+  }).join('');
+  $('.modal-card.wide').scrollTop = 0;
+  renderEpiActions(s);
+}
+
+function renderEpiActions(s) {
   $('#epiActions').innerHTML = '';
   if (s.me.isHost) {
     const b = document.createElement('button');

@@ -154,7 +154,19 @@ h1 { font-family: 'Russo One', sans-serif; font-size: 56px; letter-spacing: 6px;
 #epiVerdict.loss .v-title { color: var(--amber); }
 #epiVerdict.doom .v-title { color: var(--red); }
 #epiStory { display: grid; gap: 8px; font-size: 15px; line-height: 1.45; }
-#epiStory p { margin: 0; opacity: 0; animation: line .5s forwards; }
+#epiStory p, #epiStory h4, #epiStory .people, #epiStory .combos { margin: 0; opacity: 0; animation: line .5s forwards; }
+#epiStory h4 { font-family: 'Russo One'; font-weight: 400; color: var(--amber); font-size: 18px; margin-top: 10px; }
+.people { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
+.person { background: #1a1b1e; border-radius: 10px; padding: 10px 12px; border-left: 3px solid var(--green); font-size: 14px; }
+.person.out { border-left-color: #555; }
+.person .pl-head { flex-wrap: wrap; }
+.person p { margin: 6px 0 0; opacity: 1 !important; animation: none !important; line-height: 1.4; }
+.small { font-size: 12.5px; margin-top: 2px; }
+.combos { display: grid; gap: 6px; }
+.combo { background: #1a1b1e; border-radius: 8px; padding: 8px 10px; font-size: 14px; border-left: 3px solid #555; }
+.combo.worked { border-left-color: var(--green); }
+.combo.broken { border-left-color: var(--red); }
+.goals { line-height: 1.5; }
 @keyframes line { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 #epiAnalysis { margin-top: 20px; border-top: 1px solid #2c2d30; padding-top: 16px; }
 #epiAnalysis h3 { font-family: 'Russo One'; font-weight: 400; margin: 0 0 8px; color: var(--amber); }
@@ -237,5 +249,6 @@ body.mobile[data-sheet="gestures"] #gesturePad { display: grid; grid-template-co
 body.mobile .modal-card { padding: 16px; }
 body.mobile #epiVerdict .v-title { font-size: 26px; }
 body.mobile .judge-row { grid-template-columns: 1fr; gap: 2px; }
+body.mobile .people { grid-template-columns: 1fr; }
 body.mobile h1 { font-size: 44px; }
 body.mobile .floating { bottom: 84px; }
