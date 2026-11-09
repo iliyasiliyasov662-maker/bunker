@@ -152,6 +152,7 @@ function startGame(room) {
     const bio = makeBio();
     p.female = bio.female; p.age = bio.age;
     p.exiled = false; p.revealed = {}; p.notes = []; p.muted = false; p.double = false; p.immune = false;
+    p.tomatoes = 0;
     p.cards = { bio: bio.card };
     for (const k of ['profession', 'health', 'hobby', 'phobia', 'baggage', 'fact', 'minus']) {
       const c = room.decks[k].draw();
@@ -325,7 +326,7 @@ function evaluate(room, ids, story) {
       dead.add(p.id);
       lines.push(g(p, `💀 ${p.name} не дожил{|а} до конца: ${p.cards.health.t.toLowerCase()}.`));
     } else if (t.has('dying')) {
-      if (medic) { lines.push(g(medic, `🩺 Болезнь ${p.name} удалось держать под контролем, помог{|ла} ${medic.name}.`)); per[medic.id].saved.push('лечение больных'); }
+      if (medic) { lines.push(g(medic, `🩺 ${p.name}: болезнь удалось держать под контролем, помог{|ла} ${medic.name}.`)); per[medic.id].saved.push('лечение больных'); }
       else if (supHas('med')) lines.push(`🩺 ${p.name} выжил${p.female ? 'а' : ''} благодаря лекарствам из бункера.`);
       else { dead.add(p.id); lines.push(g(p, `💀 ${p.name} не пережил{|а} первый год: ${p.cards.health.t.toLowerCase()}, а лечить было некому.`)); }
     }
@@ -434,6 +435,8 @@ function finish(room) {
   if (hidden.length) lines.push(`🔍 Скрытые проблемы бункера: ${hidden.join(', ')}.`);
   lines.push(...actual.lines);
   for (const p of room.players.filter((x) => x.exiled)) lines.push('🌫️ ' + gend(room.decks.fates.draw(), p.female).replace(/\{name\}/g, p.name));
+  const target = room.players.slice().sort((x, y) => (y.tomatoes || 0) - (x.tomatoes || 0))[0];
+  if (target && target.tomatoes) lines.push(`🍅 Главная мишень бункера: ${target.name}, ${target.tomatoes} ${target.tomatoes % 10 === 1 && target.tomatoes % 100 !== 11 ? 'помидор' : [2, 3, 4].includes(target.tomatoes % 10) && ![12, 13, 14].includes(target.tomatoes % 100) ? 'помидора' : 'помидоров'} в противогаз.`);
 
   // ищем идеальный состав
   const all = room.players.map((p) => p.id);
@@ -573,6 +576,28 @@ function handle(room, p, msg) {
       if (alive(room).every((x) => room.votes[x.id])) tally(room);
       return {};
     }
+    case 'fx': {
+      if (!target || target.id === p.id || target.exiled) return { error: 'Посмотри на игрока за столом.' };
+      const now = Date.now();
+      if (now - (p.lastFx || 0) < 900) return { error: 'Не так быстро!' };
+      if (msg.kind === 'throw') {
+        p.lastFx = now;
+        target.tomatoes = (target.tomatoes || 0) + 1;
+        addLog(room, 'fx', `🍅 ${p.name}${p.exiled ? ' (из вентиляции)' : ''} → ${target.name}: помидор прямо в противогаз!`);
+        return { fx: { kind: 'throw', from: p.id, to: target.id } };
+      }
+      if (msg.kind === 'slap') {
+        if (p.exiled) return { error: 'Из вентиляции не дотянуться.' };
+        const n = room.players.length;
+        const i = room.players.indexOf(p), j = room.players.indexOf(target);
+        const d = Math.abs(i - j);
+        if (d !== 1 && d !== n - 1) return { error: 'Подзатыльник можно дать только соседу.' };
+        p.lastFx = now;
+        addLog(room, 'fx', `👋 ${p.name} → ${target.name}: подзатыльник!`);
+        return { fx: { kind: 'slap', from: p.id, to: target.id } };
+      }
+      return { error: 'Неизвестное действие.' };
+    }
     case 'closeVote': {
       if (!isHost || room.phase !== 'vote') return { error: 'Только ведущий во время голосования.' };
       tally(room);
@@ -591,7 +616,7 @@ function handle(room, p, msg) {
           if (!h.length) return { error: 'У этого игрока всё открыто.' };
           const k = pick(h);
           p.notes.push(`👁️ ${target.name} · ${LABEL[k]}: ${target.cards[k].t}`);
-          addLog(room, 'trump', `👁️ ${p.name} тайком подглядывает одну карту ${target.name}.`);
+          addLog(room, 'trump', `👁️ ${p.name} тайком подглядывает одну из карт игрока ${target.name}.`);
           break;
         }
         case 'expose': {

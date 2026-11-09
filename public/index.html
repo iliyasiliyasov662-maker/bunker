@@ -87,9 +87,29 @@
   </section>
 
   <div id="gestures">
-    <span><b>1</b> кивнуть</span><span><b>2</b> нет</span><span><b>3</b> развести руками</span><span><b>4</b> показать</span>
-    <span><b>5</b> поднять руку</span><span><b>6</b> фейспалм</span><span><b>7</b> ржать</span><span><b>8</b> думать</span>
-    <span class="muted">· мышь: зажми и крути · двойной клик: захват мыши · колесо: зум · H: скрыть панели</span>
+    <button data-g="nod"><b>1</b> кивнуть</button><button data-g="shake"><b>2</b> нет</button><button data-g="shrug"><b>3</b> развести руками</button>
+    <button data-g="point"><b>4</b> показать</button><button data-g="raise"><b>5</b> поднять руку</button><button data-g="facepalm"><b>6</b> фейспалм</button>
+    <button data-g="laugh"><b>7</b> ржать</button><button data-g="think"><b>8</b> думать</button><button data-g="finger"><b>9</b> средний палец</button>
+    <button data-act="throw"><b>T</b> 🍅 кинуть помидор</button><button data-act="slap"><b>F</b> 👋 подзатыльник соседу</button>
+    <span class="muted">Мышь: зажми и крути · двойной клик: захват мыши · колесо: зум · H: скрыть панели</span>
+  </div>
+
+  <div id="crosshair"><div class="dot"></div><div id="targetName"></div></div>
+
+  <nav id="mobileBar">
+    <button data-sheet="cards"><span>🃏</span>Карты</button>
+    <button data-sheet="players"><span>👥</span>Игроки</button>
+    <button data-sheet="left"><span>☢️</span>Бункер</button>
+    <button data-sheet="chat"><span>💬</span>Чат</button>
+    <button data-sheet="gestures"><span>😀</span>Жесты</button>
+    <button data-act="throw" class="act"><span>🍅</span>Кинуть</button>
+    <button data-act="slap" class="act"><span>👋</span>Шлёп</button>
+  </nav>
+
+  <div id="gesturePad" class="panel">
+    <button data-g="nod">👍<small>Кивнуть</small></button><button data-g="shake">🙅<small>Нет</small></button><button data-g="shrug">🤷<small>Развести</small></button>
+    <button data-g="point">👉<small>Показать</small></button><button data-g="raise">✋<small>Рука</small></button><button data-g="facepalm">🤦<small>Фейспалм</small></button>
+    <button data-g="laugh">😂<small>Ржать</small></button><button data-g="think">🤔<small>Думать</small></button><button data-g="finger">🖕<small>Палец</small></button>
   </div>
 </div>
 
@@ -106,6 +126,7 @@
 </section>
 
 <button id="showEpi" class="btn primary floating" hidden>Итоги игры</button>
+<div id="hitOverlay"></div>
 <div id="toasts"></div>
 
 <script type="module" src="app.js"></script>

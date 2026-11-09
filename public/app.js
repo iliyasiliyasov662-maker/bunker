@@ -51,6 +51,7 @@ function connect() {
   es.addEventListener('state', (e) => render(JSON.parse(e.data)));
   es.addEventListener('pose', (e) => { const d = JSON.parse(e.data); if (scene) scene.setPose(d.id, d.yaw, d.pitch); });
   es.addEventListener('gesture', (e) => { const d = JSON.parse(e.data); if (scene) scene.gesture(d.id, d.g); });
+  es.addEventListener('fx', (e) => { const d = JSON.parse(e.data); if (scene) scene.fx(d.kind, d.from, d.to); });
   es.addEventListener('kicked', () => backToStart('Ты больше не в этой комнате.'));
   es.addEventListener('gone', () => backToStart('Комната не найдена. Возможно, сервер перезапускался — создайте новую.'));
 }
@@ -257,6 +258,7 @@ function renderLog(s) {
     ? `<div class="e chat"><b style="color:${esc(e.color)}">${esc(e.who)}:</b> ${esc(e.t)}</div>`
     : `<div class="e ${e.k}">${esc(e.t)}</div>`).join('');
   if (near) box.scrollTop = box.scrollHeight;
+  if (last && last.k === 'chat' && MOBILE) ping('chat', true);
 }
 
 $('#chatForm').onsubmit = (e) => {
@@ -321,9 +323,11 @@ function render(s) {
   if (s.phase === 'lobby') {
     renderLobby(s);
     $('#epilogue').hidden = true; $('#showEpi').hidden = true; epiShownKey = '';
+    if (MOBILE) setSheet('');
     return;
   }
   renderTop(s); renderLeft(s); renderPlayers(s); renderMine(s); renderLog(s);
+  mobileAuto(s);
   if (s.phase === 'epilogue' && s.epilogue) renderEpilogue(s);
   else { $('#epilogue').hidden = true; $('#showEpi').hidden = true; }
 }
@@ -338,19 +342,93 @@ setInterval(() => {
   api('pose', { yaw: +pose.yaw.toFixed(3), pitch: +pose.pitch.toFixed(3) }, true);
 }, 110);
 
-const GESTURES = { 1: 'nod', 2: 'shake', 3: 'shrug', 4: 'point', 5: 'raise', 6: 'facepalm', 7: 'laugh', 8: 'think' };
-const GESTURE_TEXT = { nod: '👍 Ты киваешь', shake: '🙅 Ты мотаешь головой', shrug: '🤷 Ты разводишь руками', point: '👉 Ты показываешь', raise: '✋ Ты поднимаешь руку', facepalm: '🤦 Фейспалм', laugh: '😂 Ты ржёшь', think: '🤔 Ты задумался' };
+const GESTURES = { Digit1: 'nod', Digit2: 'shake', Digit3: 'shrug', Digit4: 'point', Digit5: 'raise', Digit6: 'facepalm', Digit7: 'laugh', Digit8: 'think', Digit9: 'finger' };
+const GESTURE_TEXT = {
+  nod: '👍 Ты киваешь', shake: '🙅 Ты мотаешь головой', shrug: '🤷 Ты разводишь руками', point: '👉 Ты показываешь', raise: '✋ Ты поднимаешь руку',
+  facepalm: '🤦 Фейспалм', laugh: '😂 Ты ржёшь', think: '🤔 Ты задумался', finger: '🖕 Ну ты понял',
+};
+
+function doGesture(g) {
+  if (!S || S.phase === 'lobby') return;
+  if (S.me.exiled) return toast('Из вентиляции жестов не видно, но помидоры кидать можно 🍅');
+  if (scene) scene.gesture(S.me.id, g);
+  if (!MOBILE) toast(GESTURE_TEXT[g]);
+  api('gesture', { g }, true);
+}
+
+let lastFx = 0;
+function doFx(kind) {
+  if (!S || S.phase === 'lobby' || !scene) return;
+  if (Date.now() - lastFx < 1000) return;
+  const target = scene.target && byId(scene.target);
+  if (!target) return toast(kind === 'throw' ? 'Посмотри на того, в кого хочешь кинуть помидор' : 'Повернись к соседу, которому хочешь дать подзатыльник', 'err');
+  if (kind === 'slap') {
+    if (S.me.exiled) return toast('Из вентиляции не дотянуться', 'err');
+    const n = S.players.length;
+    const i = S.players.findIndex((p) => p.id === S.me.id), j = S.players.findIndex((p) => p.id === target.id);
+    const d = Math.abs(i - j);
+    if (d !== 1 && d !== n - 1) return toast(`${target.name} слишком далеко. Подзатыльник — только соседу`, 'err');
+  }
+  lastFx = Date.now();
+  scene.fx(kind, S.me.id, target.id);
+  api('fx', { kind, target: target.id }, true);
+}
+
 window.addEventListener('keydown', (e) => {
   if (!S || S.phase === 'lobby') return;
   if (e.target.matches('input, textarea, select')) return;
-  if (e.key === 'h' || e.key === 'H' || e.key === 'р' || e.key === 'Р') { $('#hud').classList.toggle('hidden-panels'); return; }
+  if (e.code === 'KeyH') { $('#hud').classList.toggle('hidden-panels'); return; }
   if (e.key === 'Enter') { $('#chatInput').focus(); e.preventDefault(); return; }
-  const g = GESTURES[e.key];
-  if (!g || S.me.exiled) return;
-  if (scene) scene.gesture(S.me.id, g);
-  toast(GESTURE_TEXT[g]);
-  api('gesture', { g }, true);
+  if (e.code === 'KeyT') return doFx('throw');
+  if (e.code === 'KeyF') return doFx('slap');
+  const g = GESTURES[e.code];
+  if (g) doGesture(g);
 });
+
+document.querySelectorAll('[data-g]').forEach((b) => (b.onclick = () => { doGesture(b.dataset.g); if (MOBILE) setSheet(''); }));
+document.querySelectorAll('[data-act]').forEach((b) => (b.onclick = () => doFx(b.dataset.act)));
+
+// ---------- телефон: нижняя панель и выезжающие окна ----------
+const MOBILE = window.matchMedia('(max-width: 820px), (pointer: coarse)').matches;
+document.body.classList.toggle('mobile', MOBILE);
+function setSheet(name) {
+  document.body.dataset.sheet = name;
+  document.querySelectorAll('#mobileBar [data-sheet]').forEach((b) => {
+    b.classList.toggle('on', b.dataset.sheet === name);
+    if (b.dataset.sheet === name) b.classList.remove('ping');
+  });
+  if (name === 'chat') { const box = $('#log'); box.scrollTop = box.scrollHeight; }
+}
+document.querySelectorAll('#mobileBar [data-sheet]').forEach((b) => (b.onclick = () => setSheet(document.body.dataset.sheet === b.dataset.sheet ? '' : b.dataset.sheet)));
+$('#scene').addEventListener('pointerdown', () => { if (MOBILE && document.body.dataset.sheet) setSheet(''); });
+const ping = (name, on) => { const b = document.querySelector(`#mobileBar [data-sheet="${name}"]`); if (b && document.body.dataset.sheet !== name) b.classList.toggle('ping', on); };
+
+let autoKey = '', autoSheet = '';
+function mobileAuto(s) {
+  if (!MOBILE) return;
+  const me = s.me;
+  const myTurn = s.phase === 'reveal' && s.speaker === me.id && !s.turnRevealed;
+  const needVote = s.phase === 'vote' && !me.exiled && !me.vote;
+  const key = myTurn ? 'turn' + s.round : needVote ? 'vote' + s.round + (s.revote ? 'r' : '') : '';
+  ping('cards', myTurn);
+  ping('players', needVote);
+  if (key && key !== autoKey) { autoKey = key; autoSheet = myTurn ? 'cards' : 'players'; setSheet(autoSheet); }
+  // сами открыли — сами и закроем, когда ход или голос закончился
+  const turnOver = autoSheet === 'cards' && !(s.phase === 'reveal' && s.speaker === me.id);
+  const voteOver = autoSheet === 'players' && !(s.phase === 'vote' && !me.vote);
+  if (autoSheet && (turnOver || voteOver)) { if (document.body.dataset.sheet === autoSheet) setSheet(''); autoSheet = ''; }
+}
+
+// попадания по мне
+function onHitMe(kind, fromId) {
+  const from = fromId && S && byId(fromId);
+  const ov = $('#hitOverlay');
+  ov.className = '';
+  void ov.offsetWidth;
+  ov.className = kind === 'throw' ? 'splat' : 'slap';
+  toast(kind === 'throw' ? `🍅 ${from ? from.name + ' попадает' : 'Кто-то попадает'} в тебя помидором!` : `👋 ${from ? from.name : 'Сосед'} отвешивает тебе подзатыльник!`);
+  if (navigator.vibrate) navigator.vibrate(kind === 'throw' ? 120 : 60);
+}
 
 // ---------- запуск ----------
 (async function boot() {
@@ -363,6 +441,9 @@ window.addEventListener('keydown', (e) => {
     const m = await import('./scene.js');
     scene = new m.Scene3D($('#scene'));
     scene.onLook = (yaw, pitch) => { pose = { yaw, pitch }; };
+    scene.onTarget = (id) => { const p = id && S && byId(id); $('#targetName').textContent = p ? '🎯 ' + p.name : ''; };
+    scene.onHitMe = onHitMe;
+    window.__scene = scene; // для отладки в консоли
     if (S) scene.setPlayers(S, S.me.id);
   } catch (err) {
     console.warn('3D не загрузилось:', err);

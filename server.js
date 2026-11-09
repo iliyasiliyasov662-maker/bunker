@@ -107,6 +107,7 @@ async function api(req, res) {
 
   const r = G.handle(room, player, msg);
   if (r.error) return json(res, 400, { error: r.error });
+  if (r.fx) broadcast(room, 'fx', r.fx, player.id);
   if (r.kicked) dropSubscriber(room, r.kicked, 'kicked');
   if (r.left) dropSubscriber(room, player.id, 'kicked');
   if (!room.players.length) { rooms.delete(room.code); subs.delete(room.code); return json(res, 200, { ok: true }); }
