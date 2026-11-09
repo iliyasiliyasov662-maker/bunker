@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Бункер</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Russo+One&family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<div id="scene"></div>
+
+<!-- Вход -->
+<section id="start" class="screen">
+  <div class="start-card">
+    <div class="hazard"></div>
+    <h1>БУНКЕР</h1>
+    <p class="sub">Мест в бункере на всех не хватит. Докажи, что ты нужнее.</p>
+    <label class="field">Твоё имя
+      <input id="name" maxlength="18" placeholder="Например, Вася" autocomplete="off">
+    </label>
+    <button id="createBtn" class="btn primary">Создать комнату</button>
+    <div class="or">или войди к друзьям</div>
+    <div class="row">
+      <input id="codeInput" maxlength="4" placeholder="КОД" autocomplete="off" class="code-input">
+      <button id="joinBtn" class="btn">Войти</button>
+    </div>
+    <p class="hint">Лучше всего играть впятером или вшестером, общаться удобно в Discord.</p>
+  </div>
+</section>
+
+<!-- Лобби -->
+<section id="lobby" class="modal" hidden>
+  <div class="modal-card">
+    <h2>Комната <span id="lobbyCode" class="code"></span></h2>
+    <div class="invite">
+      <input id="inviteLink" readonly>
+      <button id="copyBtn" class="btn small">Копировать</button>
+    </div>
+    <p class="muted">Отправь ссылку друзьям. Игроков: 2–8, лучше 5–6. В бункер попадёт половина.</p>
+    <ul id="lobbyPlayers" class="lobby-players"></ul>
+    <div class="settings">
+      <label class="toggle"><input type="checkbox" id="setOutsiders"> <span>Выгнанные действуют снаружи</span></label>
+      <label class="toggle"><input type="checkbox" id="setAdult"> <span>Набор карт 18+</span></label>
+    </div>
+    <div class="lobby-actions">
+      <button id="startBtn" class="btn primary">Начать игру</button>
+      <button id="leaveBtn" class="btn ghost">Выйти</button>
+    </div>
+    <p id="lobbyWait" class="muted"></p>
+  </div>
+</section>
+
+<!-- Игровой интерфейс -->
+<div id="hud" hidden>
+  <header id="top">
+    <div id="phase"></div>
+    <div id="hostControls"></div>
+  </header>
+
+  <aside id="left" class="panel">
+    <div id="catastrophe"></div>
+    <div id="bunker"></div>
+    <div id="threats"></div>
+    <div id="notes"></div>
+  </aside>
+
+  <aside id="right" class="panel">
+    <div class="panel-title">Игроки <span id="seats" class="muted"></span></div>
+    <div id="players"></div>
+  </aside>
+
+  <section id="bottom">
+    <div id="turnHint"></div>
+    <div id="myCards"></div>
+    <div id="myExtras"></div>
+  </section>
+
+  <section id="chat" class="panel">
+    <div id="log"></div>
+    <form id="chatForm"><input id="chatInput" maxlength="300" placeholder="Сообщение… (Enter)" autocomplete="off"></form>
+  </section>
+
+  <div id="gestures">
+    <span><b>1</b> кивнуть</span><span><b>2</b> нет</span><span><b>3</b> развести руками</span><span><b>4</b> показать</span>
+    <span><b>5</b> поднять руку</span><span><b>6</b> фейспалм</span><span><b>7</b> ржать</span><span><b>8</b> думать</span>
+    <span class="muted">· мышь: зажми и крути · двойной клик: захват мыши · колесо: зум · H: скрыть панели</span>
+  </div>
+</div>
+
+<!-- Финал -->
+<section id="epilogue" class="modal" hidden>
+  <div class="modal-card wide">
+    <button id="closeEpi" class="close" title="Свернуть">✕</button>
+    <div id="epiVerdict"></div>
+    <div id="epiStory"></div>
+    <div id="epiAnalysis"></div>
+    <details id="epiCards"><summary>Все карты игроков</summary><div id="epiCardsList"></div></details>
+    <div id="epiActions"></div>
+  </div>
+</section>
+
+<button id="showEpi" class="btn primary floating" hidden>Итоги игры</button>
+<div id="toasts"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
